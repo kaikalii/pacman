@@ -3,6 +3,10 @@ from pygame import Vector2
 from enum import Enum
 
 
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
 class Tile(Enum):
     Empty = 0
     Wall = 1
@@ -25,10 +29,10 @@ board_spec = [
     "     X.XX          XX.X     ",
     "     X.XX XXX--XXX XX.X     ",
     "XXXXXX.XX X      X XX.XXXXXX",
-    "      .XX X      X XX.      ",
+    "      .XX X 1234 X XX.      ",
     "XXXXXX.XX X      X XX.XXXXXX",
     "     X.XX XXXXXXXX XX.X     ",
-    "     X.XX          XX.X     ",
+    "     X.XX    S     XX.X     ",
     "XXXXXX.XX XXXXXXXX XX.XXXXXX",
     "X............XX............X",
     "X.XXXX.XXXXX.XX.XXXXX.XXXX.X",
@@ -46,12 +50,79 @@ board_spec = [
 
 class Board:
     def __init__(self):
-        self.height = len(board_spec)
-        self.width = len(board_spec[0])
-        self.tiles = []
-        for line in board_spec:
+        pass
+
+    def __getitem__(self, key):
+        if key.x >= self.width:
+            return None
+        if key.y >= self.height:
+            return None
+        return self.tiles[key.y][key.x]
+
+
+class Entity:
+    def __init__(self, pos):
+        self.pos = pos
+        self.dest = pos
+        self.prog = 0
+
+    def render_pos(self):
+        return Vector2(
+            lerp(self.pos.x, self.dest.x, self.prog),
+            lerp(self.pos.y, self.dest.y, self.prog),
+        )
+
+    def update(self, dt):
+        self.prog += dt
+        if self.prog >= 1:
+            self.pos = self.dest
+            self.prog %= 1
+            return True
+        else:
+            return False
+
+
+class Pacman(Entity):
+    def __init__(self, pos):
+        super().__init__(pos)
+
+    def render(self, screen, offset, scale):
+        pygame.draw.circle(
+            screen,
+            (255, 255, 0),
+            offset + self.render_pos() * scale + Vector2(scale) / 2,
+            scale / 2,
+        )
+
+    def update(self, dt, board):
+        super().update(dt)
+
+
+class Ghost(Entity):
+    colors = [(255, 128, 255), (255, 128, 0), (0, 255, 255), (255, 0, 0)]
+
+    def __init__(self, id, pos):
+        super().__init__(pos)
+        self.id = id
+        self.fleeing = False
+
+    def render(self, screen, offset, scale):
+        color = (0, 0, 255) if self.fleeing else Ghost.colors[self.id]
+        tl = offset + self.render_pos() * scale + Vector2(scale * 0.1, 0)
+        size = Vector2(scale * 0.8, scale)
+        pygame.draw.rect(screen, color, (tl, size))
+
+
+class Game:
+    def __init__(self):
+        self.board = Board()
+        self.board.height = len(board_spec)
+        self.board.width = len(board_spec[0])
+        self.board.tiles = []
+        self.ghosts = [None, None, None, None]
+        for j, line in enumerate(board_spec):
             row = []
-            for c in line:
+            for i, c in enumerate(line):
                 match c:
                     case "X":
                         row.append(Tile.Wall)
@@ -63,23 +134,19 @@ class Board:
                         row.append(Tile.Power)
                     case "-":
                         row.append(Tile.Gate)
-            self.tiles.append(row)
-
-    def __getitem__(self, key):
-        if key.x >= self.width:
-            return None
-        if key.y >= self.height:
-            return None
-        return self.tiles[key.y][key.x]
-
-
-class Game:
-    def __init__(self):
-        self.board = Board()
-        self.pos = Vector2(13, 16)
+                    case "1" | "2" | "3" | "4":
+                        row.append(Tile.Empty)
+                        id = "1234".index(c)
+                        self.ghosts[id] = Ghost(id, Vector2(i, j))
+                    case "S":
+                        row.append(Tile.Empty)
+                        self.pac = Pacman(Vector2(i, j))
+            self.board.tiles.append(row)
 
     def update(self, dt):
-        pass
+        self.pac.update(dt, self.board)
+        for ghost in self.ghosts:
+            ghost.update(dt)
 
     def render(self, screen):
         screen_size = Vector2(screen.get_width(), screen.get_height())
@@ -93,20 +160,27 @@ class Game:
         for j, row in enumerate(self.board.tiles):
             for i, tile in enumerate(row):
                 corner = offset + Vector2(i, j) * scale
-                size = Vector2(scale, scale)
+                size = Vector2(scale)
                 center = corner + size / 2
                 size += Vector2(1, 1)  # Render fix
                 match tile:
                     case Tile.Wall:
                         pygame.draw.rect(screen, (0, 0, 244), (corner, size))
                     case Tile.Pellet:
-                        pygame.draw.circle(screen, (255, 255, 0), center, scale / 8)
+                        pygame.draw.circle(screen, (255, 255, 128), center, scale / 8)
                     case Tile.Power:
-                        pygame.draw.circle(screen, (255, 255, 0), center, scale / 3)
+                        pygame.draw.circle(screen, (255, 255, 128), center, scale / 3)
                     case Tile.Gate:
                         corner.y += scale * 0.4
                         size.y *= 0.2
                         pygame.draw.rect(screen, (255, 255, 255), (corner, size))
+
+        # Pacman
+        self.pac.render(screen, offset, scale)
+
+        # Ghosts
+        for ghost in self.ghosts:
+            ghost.render(screen, offset, scale)
 
 
 def text(str, size, color):
