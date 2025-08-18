@@ -249,8 +249,12 @@ class Ghost:
                             case 0:
                                 dest = pac.pos
                             case 1:
-                                dest = lerp(pac.pos, ghosts[0].pos, 2)
-                                if board[dest] == Tile.Wall:
+                                for t in [2, 1.75, 1.5, 1.25]:
+                                    new = lerp(pac.pos, ghosts[0].pos, t)
+                                    if board[new] and board[new] != Tile.Wall:
+                                        dest = new
+                                        break
+                                else:
                                     dest = pac.pos
                             case 2:
                                 for mul in [2, 1]:
