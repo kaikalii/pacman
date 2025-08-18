@@ -1,19 +1,19 @@
 import pygame
 from pygame import Vector2
 from enum import Enum
-from math import floor, sqrt
+from math import floor, sqrt, sin, tau
 from astar import find_path
 
 
 # Constants
-speed = 4
-dot_score = 10
-power_score = 50
-ghost_mul = 100
-scared_duration = 8
-eaten_speed_mul = 2
-scared_speed_mul = 0.7
-top_size = 2
+speed = 4  # Default speed of pacman and ghosts
+dot_score = 10  # Score from eating a dot
+power_score = 50  # Score from eating a power pellet
+ghost_mul = 100  # Ghost score multiplier
+scared_duration = 8  # Duration that ghosts are scared after eating a pellet
+eaten_speed_mul = 1.8  # Ghost speed multiplier after being eaten
+scared_speed_mul = 0.7  # Ghost speed multiplier when scared
+top_size = 2  # Cell size of top text bar
 
 
 def lerp(a, b, t):
@@ -119,13 +119,15 @@ class Pacman:
         self.dir = Vector2(0)
         self.queue = None
         self.size = 1
+        self.anim_timer = 0
 
     def render(self, screen, offset, scale):
+        size = min(self.size, 1 - 0.15 * (sin(self.anim_timer * tau * 4) / 2 + 1))
         pygame.draw.circle(
             screen,
             (255, 255, 0),
             offset + self.pos * scale,
-            scale / 2 * self.size,
+            scale / 2 * size,
         )
 
     def can_move_toward(self, dir, board):
@@ -183,8 +185,10 @@ class Pacman:
             self.dir = Vector2(0)
 
         # Update position
-        self.pos += self.dir * dt * speed
-        self.pos = board.wrap(self.pos)
+        if self.dir.length() > 0:
+            self.anim_timer += dt
+            self.pos += self.dir * dt * speed
+            self.pos = board.wrap(self.pos)
 
 
 class Ghost:
@@ -204,8 +208,11 @@ class Ghost:
         self.pos: Vector2 = self.spawn
         self.dest = None
         self.state = Ghost.State.ChaseScatter
+        self.scared_spawn = False
 
     def update(self, dt, pac: Pacman, ghosts, board: Board):
+        if board.time < self.id * 0.1:
+            return
         speed_mul = speed * (
             eaten_speed_mul
             if self.state == Ghost.State.Eaten
@@ -258,9 +265,11 @@ class Ghost:
                                 else:
                                     dest = pac.pos
                             case _:
-                                dest = self.pos
+                                dest = pac.pos
                 case Ghost.State.Scared:
-                    dest = scatters[self.id % 4]
+                    dest = self.spawn if self.scared_spawn else scatters[self.id % 4]
+                    if self.pos.distance_to(dest) < 1:
+                        self.scared_spawn = not self.scared_spawn
                 case Ghost.State.Eaten:
                     dest = self.spawn
             dest = (int(dest.x), int(dest.y))
@@ -303,7 +312,7 @@ class Ghost:
             pygame.draw.circle(
                 screen,
                 color,
-                offset + (self.pos - Vector2(0, 0.1)) * scale,
+                offset + (self.pos - Vector2(0.01, 0.1)) * scale,
                 0.4 * scale,
             )
         pygame.draw.rect(screen, color, (tl, size))
@@ -376,6 +385,7 @@ class Game:
                         self.scared_timer = scared_duration
                         for ghost in self.ghosts:
                             ghost.state = Ghost.State.Scared
+                            ghost.scared_spawn = False
 
                 # Pac/Ghost collision
                 for ghost in self.ghosts:
