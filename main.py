@@ -245,7 +245,7 @@ class Ghost:
                     if board.scatter():
                         dest = scatters[self.id % 4]
                     else:
-                        match self.id:
+                        match self.id % 4:
                             case 0:
                                 dest = pac.pos
                             case 1:
@@ -264,8 +264,6 @@ class Ghost:
                                     dest = scatters[3]
                                 else:
                                     dest = pac.pos
-                            case _:
-                                dest = pac.pos
                 case Ghost.State.Scared:
                     dest = self.spawn if self.scared_spawn else scatters[self.id % 4]
                     if self.pos.distance_to(dest) < 1:
