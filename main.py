@@ -11,7 +11,7 @@ def lerp(a, b, t):
 class Tile(Enum):
     Empty = 0
     Wall = 1
-    Pellet = 2
+    Dot = 2
     Power = 3
     Gate = 4
 
@@ -76,12 +76,16 @@ class Board:
 
 
 speed = 3
+dot_score = 10
+power_score = 50
+ghost_mul = 100
 
 
 class Pacman:
     def __init__(self, pos):
         self.pos = pos
         self.dir = Vector2(0)
+        self.queue = None
 
     def render(self, screen, offset, scale):
         pygame.draw.circle(
@@ -114,16 +118,37 @@ class Pacman:
             new_dir.y = 0
 
         # Set direction
-        if new_dir.length() > 0 and self.can_move_toward(new_dir, board):
-            if self.dir.dot(new_dir) == 0:
-                if new_dir.x != 0 and (self.pos.y % 1 > 0.4 and self.pos.y % 1 < 0.6):
-                    self.pos.y = floor(self.pos.y) + 0.5
+        if new_dir.length() > 0:
+            if self.can_move_toward(new_dir, board):
+                if self.dir.dot(new_dir) == 0:
+                    if new_dir.x != 0:
+                        if self.pos.y % 1 > 0.4 and self.pos.y % 1 < 0.6:
+                            self.pos.y = floor(self.pos.y) + 0.5
+                            self.dir = new_dir
+                        else:
+                            self.queue = new_dir
+                    elif new_dir.y != 0:
+                        if self.pos.x % 1 > 0.4 and self.pos.x % 1 < 0.6:
+                            self.pos.x = floor(self.pos.x) + 0.5
+                            self.dir = new_dir
+                        else:
+                            self.queue = new_dir
+                else:
                     self.dir = new_dir
-                elif new_dir.y != 0 and (self.pos.x % 1 > 0.4 and self.pos.x % 1 < 0.6):
-                    self.pos.x = floor(self.pos.x) + 0.5
-                    self.dir = new_dir
+                    self.queue = None
             else:
-                self.dir = new_dir
+                self.queue = new_dir
+        elif self.queue and self.can_move_toward(self.queue, board):
+            if self.queue.x != 0:
+                if self.pos.y % 1 > 0.4 and self.pos.y % 1 < 0.6:
+                    self.pos.y = floor(self.pos.y) + 0.5
+                    self.dir = self.queue
+                    self.queue = None
+            elif self.queue.y != 0:
+                if self.pos.x % 1 > 0.4 and self.pos.x % 1 < 0.6:
+                    self.pos.x = floor(self.pos.x) + 0.5
+                    self.dir = self.queue
+                    self.queue = None
         elif not self.can_move_toward(self.dir * 0.5, board):
             self.dir = Vector2(0)
 
@@ -177,7 +202,7 @@ class Game:
                     case " ":
                         row.append(Tile.Empty)
                     case ".":
-                        row.append(Tile.Pellet)
+                        row.append(Tile.Dot)
                     case "o":
                         row.append(Tile.Power)
                     case "-":
@@ -199,12 +224,12 @@ class Game:
             ghost.update(dt)
 
         match self.board.get_wrapped(self.pac.pos):
-            case Tile.Pellet:
+            case Tile.Dot:
                 self.board.set_wrapped(self.pac.pos, Tile.Empty)
-                self.score += 1
+                self.score += dot_score
             case Tile.Power:
                 self.board.set_wrapped(self.pac.pos, Tile.Empty)
-                self.score += 1
+                self.score += power_score
                 self.flee_timer = 10
                 for ghost in self.ghosts:
                     ghost.state = Ghost.State.Fleeing
@@ -217,12 +242,27 @@ class Game:
 
     def render(self, screen):
         screen_size = Vector2(screen.get_width(), screen.get_height())
-        scale = min(screen_size.x / self.board.width, screen_size.y / self.board.height)
-        screen.fill((0, 0, 0))
-        offset = Vector2(
-            screen_size.x / 2 - scale * self.board.width / 2,
-            screen_size.y / 2 - scale * self.board.height / 2,
+        top_size = 2
+        scale = min(
+            screen_size.x / (self.board.width + top_size),
+            screen_size.y / (self.board.height + top_size),
         )
+        screen.fill((0, 0, 0))
+        top_offset = Vector2(0, top_size * scale)
+        offset = (
+            (screen_size - top_offset) / 2
+            - Vector2(
+                scale * self.board.width / 2,
+                scale * self.board.height / 2,
+            )
+            + top_offset
+        )
+        # Score
+        screen.blit(
+            text(str(self.score).zfill(4), int(top_size * scale), "white"),
+            offset - top_offset,
+        )
+
         # Board
         for j, row in enumerate(self.board.tiles):
             for i, tile in enumerate(row):
@@ -233,7 +273,7 @@ class Game:
                 match tile:
                     case Tile.Wall:
                         pygame.draw.rect(screen, (0, 0, 244), (corner, size))
-                    case Tile.Pellet:
+                    case Tile.Dot:
                         pygame.draw.circle(screen, (255, 255, 128), center, scale / 8)
                     case Tile.Power:
                         pygame.draw.circle(screen, (255, 255, 128), center, scale / 3)
