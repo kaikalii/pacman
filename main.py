@@ -12,7 +12,7 @@ power_score = 50
 ghost_mul = 100
 scared_duration = 8
 eaten_speed_mul = 2
-scared_speed_mul = 0.8
+scared_speed_mul = 0.7
 top_size = 2
 
 
@@ -71,6 +71,8 @@ class Board:
         self.tiles = []
         self.time = 0
         self.max_dots = 0
+        self.width = 0
+        self.height = 0
 
     def __getitem__(self, key):
         if key.x < 0 or key.x >= self.width:
@@ -108,8 +110,12 @@ class Board:
 
 
 class Pacman:
-    def __init__(self, pos):
-        self.pos = pos
+    def __init__(self, spawn):
+        self.spawn = spawn
+        self.reset()
+
+    def reset(self):
+        self.pos = self.spawn
         self.dir = Vector2(0)
         self.queue = None
         self.size = 1
@@ -189,10 +195,13 @@ class Ghost:
 
     colors = [(255, 0, 0), (0, 255, 255), (255, 128, 255), (255, 128, 0)]
 
-    def __init__(self, id, pos: Vector2):
+    def __init__(self, id, spawn: Vector2):
         self.id = id
-        self.pos: Vector2 = pos
-        self.spawn: Vector2 = pos
+        self.spawn: Vector2 = spawn
+        self.reset()
+
+    def reset(self):
+        self.pos: Vector2 = self.spawn
         self.dest = None
         self.state = Ghost.State.ChaseScatter
 
@@ -305,7 +314,7 @@ class Game:
         Start = 0
         Playing = 1
         Dying = 2
-        Dead = 3
+        Lose = 3
         Win = 4
 
     def __init__(self):
@@ -318,6 +327,7 @@ class Game:
         self.scared_timer = 0
         self.dots_eaten = 0
         self.ghosts_eaten = 0
+        self.lives = 2
         for j, line in enumerate(board_spec):
             row = []
             for i, c in enumerate(line):
@@ -369,7 +379,7 @@ class Game:
 
                 # Pac/Ghost collision
                 for ghost in self.ghosts:
-                    if (ghost.pos - self.pac.pos).length() < 0.4:
+                    if (ghost.pos - self.pac.pos).length() < 0.3:
                         match ghost.state:
                             case Ghost.State.ChaseScatter:
                                 self.state = Game.State.Dying
@@ -379,6 +389,7 @@ class Game:
                                 self.ghosts_eaten += 1
                                 self.score += ghost_mul * 2 ** min(self.ghosts_eaten, 4)
 
+                # Win condition
                 if self.dots_eaten == self.board.max_dots:
                     self.state = Game.State.Win
                     return
@@ -394,11 +405,18 @@ class Game:
             case Game.State.Dying:
                 self.pac.size = max(0, self.pac.size - 0.5 * dt)
                 if self.pac.size == 0:
-                    self.state = Game.State.Dead
+                    if self.lives == 0:
+                        self.state = Game.State.Lose
+                    else:
+                        self.lives = 1
+                        self.pac.reset()
+                        for ghost in self.ghosts:
+                            ghost.reset()
+                        self.state = Game.State.Playing
 
     def space(self):
         match self.state:
-            case Game.State.Start | Game.State.Dead:
+            case Game.State.Start | Game.State.Lose | Game.State.Win:
                 self.__init__()
                 self.state = Game.State.Playing
 
@@ -432,7 +450,7 @@ class Game:
                 self.render_game(screen, scale, offset)
             case Game.State.Dying:
                 self.render_game(screen, scale, offset)
-            case Game.State.Dead:
+            case Game.State.Lose:
                 self.render_game(screen, scale, offset)
                 draw_rect_alpha(screen, (0, 0, 0, 180), (Vector2(), screen_size))
                 screen.blit(
@@ -462,6 +480,11 @@ class Game:
             text(str(self.score).zfill(4), top_size * scale, "white"),
             offset - Vector2(0, top_size * scale),
         )
+
+        # Lives
+        for i in range(self.lives):
+            pos = offset + scale * Vector2(self.board.width - 0.5 - i, -0.5)
+            pygame.draw.circle(screen, (255, 255, 0), pos, scale * 0.5)
 
         # Board
         for j, row in enumerate(self.board.tiles):
