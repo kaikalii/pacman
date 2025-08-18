@@ -10,9 +10,10 @@ speed = 4
 dot_score = 10
 power_score = 50
 ghost_mul = 100
-scared_duration = 6
+scared_duration = 8
 eaten_speed_mul = 2
 scared_speed_mul = 0.8
+top_size = 2
 
 
 def lerp(a, b, t):
@@ -69,6 +70,7 @@ class Board:
     def __init__(self):
         self.tiles = []
         self.time = 0
+        self.max_dots = 0
 
     def __getitem__(self, key):
         if key.x < 0 or key.x >= self.width:
@@ -110,13 +112,14 @@ class Pacman:
         self.pos = pos
         self.dir = Vector2(0)
         self.queue = None
+        self.size = 1
 
     def render(self, screen, offset, scale):
         pygame.draw.circle(
             screen,
             (255, 255, 0),
             offset + self.pos * scale,
-            scale / 2,
+            scale / 2 * self.size,
         )
 
     def can_move_toward(self, dir, board):
@@ -267,29 +270,54 @@ class Ghost:
             if len(path) >= 2:
                 self.dest = Vector2(path[1][0], path[1][1]) + Vector2(0.5)
 
-    def render(self, screen, offset, scale):
-        color = [
-            Ghost.colors[self.id],
-            (0, 0, 255),
-            (255, 255, 255),
-        ][self.state.value]
+    def render(self, screen, offset, scale, scared_timer):
+        color = (
+            Ghost.colors[self.id]
+            if self.state == Ghost.State.ChaseScatter
+            else (
+                (0, 0, 255)
+                if self.state == Ghost.State.Scared
+                and (scared_timer > 2 or scared_timer % 0.4 < 0.2)
+                else (255, 255, 255)
+            )
+        )
         if self.state == Ghost.State.Eaten:
             tl = offset + (self.pos - Vector2(0.5)) * scale + Vector2(0, scale * 0.4)
             size = Vector2(scale, scale * 0.2)
         else:
-            tl = offset + (self.pos - Vector2(0.5)) * scale + Vector2(scale * 0.1, 0)
-            size = Vector2(scale * 0.8, scale)
+            tl = (
+                offset
+                + (self.pos - Vector2(0.5, 0.1)) * scale
+                + Vector2(scale * 0.1, 0)
+            )
+            size = Vector2(scale * 0.8, scale * 0.6)
+            pygame.draw.circle(
+                screen,
+                color,
+                offset + (self.pos - Vector2(0, 0.1)) * scale,
+                0.4 * scale,
+            )
         pygame.draw.rect(screen, color, (tl, size))
 
 
 class Game:
+    class State:
+        Start = 0
+        Playing = 1
+        Dying = 2
+        Dead = 3
+        Win = 4
+
     def __init__(self):
+        self.state = Game.State.Start
         self.board = Board()
         self.board.height = len(board_spec)
         self.board.width = len(board_spec[0])
         self.ghosts: list[Ghost] = []
         self.score = 0
-        self.flee_timer = 0
+        self.scared_timer = 0
+        self.dots_eaten = 0
+        self.ghosts_eaten = 0
         for j, line in enumerate(board_spec):
             row = []
             for i, c in enumerate(line):
@@ -300,8 +328,10 @@ class Game:
                         row.append(Tile.Empty)
                     case ".":
                         row.append(Tile.Dot)
+                        self.board.max_dots += 1
                     case "o":
                         row.append(Tile.Power)
+                        self.board.max_dots += 1
                     case "-":
                         row.append(Tile.Gate)
                     case "1" | "2" | "3" | "4":
@@ -316,45 +346,64 @@ class Game:
             self.board.tiles.append(row)
 
     def update(self, dt):
-        # Update entities
-        self.pac.update(dt, self.board)
-        for ghost in self.ghosts:
-            ghost.update(dt, self.pac, self.ghosts, self.board)
-
-        # Eat dots
-        match self.board.get_wrapped(self.pac.pos):
-            case Tile.Dot:
-                self.board.set_wrapped(self.pac.pos, Tile.Empty)
-                self.score += dot_score
-            case Tile.Power:
-                self.board.set_wrapped(self.pac.pos, Tile.Empty)
-                self.score += power_score
-                self.flee_timer = scared_duration
+        match self.state:
+            case Game.State.Playing:
+                # Update entities
+                self.pac.update(dt, self.board)
                 for ghost in self.ghosts:
-                    ghost.state = Ghost.State.Scared
+                    ghost.update(dt, self.pac, self.ghosts, self.board)
 
-        # Pac/Ghost collision
-        for ghost in self.ghosts:
-            if (ghost.pos - self.pac.pos).length() < 0.4:
-                match ghost.state:
-                    case Ghost.State.ChaseScatter:
-                        # TODO: Death
-                        pass
-                    case Ghost.State.Scared:
-                        ghost.state = Ghost.State.Eaten
+                # Eat dots
+                match self.board.get_wrapped(self.pac.pos):
+                    case Tile.Dot:
+                        self.board.set_wrapped(self.pac.pos, Tile.Empty)
+                        self.score += dot_score
+                        self.dots_eaten += 1
+                    case Tile.Power:
+                        self.board.set_wrapped(self.pac.pos, Tile.Empty)
+                        self.score += power_score
+                        self.dots_eaten += 1
+                        self.scared_timer = scared_duration
+                        for ghost in self.ghosts:
+                            ghost.state = Ghost.State.Scared
 
-        self.board.time += dt
+                # Pac/Ghost collision
+                for ghost in self.ghosts:
+                    if (ghost.pos - self.pac.pos).length() < 0.4:
+                        match ghost.state:
+                            case Ghost.State.ChaseScatter:
+                                self.state = Game.State.Dying
+                                return
+                            case Ghost.State.Scared:
+                                ghost.state = Ghost.State.Eaten
+                                self.ghosts_eaten += 1
+                                self.score += ghost_mul * 2 ** min(self.ghosts_eaten, 4)
 
-        # Flee timer
-        self.flee_timer = max(0, self.flee_timer - dt)
-        if self.flee_timer == 0:
-            for ghost in self.ghosts:
-                if ghost.state == Ghost.State.Scared:
-                    ghost.state = Ghost.State.ChaseScatter
+                if self.dots_eaten == self.board.max_dots:
+                    self.state = Game.State.Win
+                    return
+
+                self.board.time += dt
+
+                # Scared timer
+                self.scared_timer = max(0, self.scared_timer - dt)
+                if self.scared_timer == 0:
+                    for ghost in self.ghosts:
+                        if ghost.state == Ghost.State.Scared:
+                            ghost.state = Ghost.State.ChaseScatter
+            case Game.State.Dying:
+                self.pac.size = max(0, self.pac.size - 0.5 * dt)
+                if self.pac.size == 0:
+                    self.state = Game.State.Dead
+
+    def space(self):
+        match self.state:
+            case Game.State.Start | Game.State.Dead:
+                self.__init__()
+                self.state = Game.State.Playing
 
     def render(self, screen):
         screen_size = Vector2(screen.get_width(), screen.get_height())
-        top_size = 2
         scale = min(
             screen_size.x / (self.board.width + top_size),
             screen_size.y / (self.board.height + top_size),
@@ -369,10 +418,49 @@ class Game:
             )
             + top_offset
         )
+        match self.state:
+            case Game.State.Start:
+                screen.blit(
+                    text("PAC-MAN", scale * 4, (255, 255, 0)),
+                    offset + Vector2(0, scale * top_size),
+                )
+                screen.blit(
+                    text("Press SPACE to start", scale * 2, (255, 255, 0)),
+                    offset + Vector2(0, scale * (top_size + 6)),
+                )
+            case Game.State.Playing:
+                self.render_game(screen, scale, offset)
+            case Game.State.Dying:
+                self.render_game(screen, scale, offset)
+            case Game.State.Dead:
+                self.render_game(screen, scale, offset)
+                draw_rect_alpha(screen, (0, 0, 0, 180), (Vector2(), screen_size))
+                screen.blit(
+                    text("GAME OVER!", scale * 4, (255, 255, 0)),
+                    offset + Vector2(0, scale * top_size),
+                )
+                screen.blit(
+                    text("Press SPACE to play again", scale * 2, (255, 255, 0)),
+                    offset + Vector2(0, scale * (top_size + 6)),
+                )
+            case Game.State.Win:
+                self.render_game(screen, scale, offset)
+                draw_rect_alpha(screen, (0, 0, 0, 180), (Vector2(), screen_size))
+                screen.blit(
+                    text("YOU WIN!", scale * 4, (255, 255, 0)),
+                    offset + Vector2(0, scale * top_size),
+                )
+                screen.blit(
+                    text("Press SPACE to play again", scale * 2, (255, 255, 0)),
+                    offset + Vector2(0, scale * (top_size + 6)),
+                )
+
+    def render_game(self, screen, scale, offset):
+
         # Score
         screen.blit(
-            text(str(self.score).zfill(4), int(top_size * scale), "white"),
-            offset - top_offset,
+            text(str(self.score).zfill(4), top_size * scale, "white"),
+            offset - Vector2(0, top_size * scale),
         )
 
         # Board
@@ -394,22 +482,33 @@ class Game:
                         size.y *= 0.2
                         pygame.draw.rect(screen, (255, 255, 255), (corner, size))
 
-        # Pacman
-        self.pac.render(screen, offset, scale)
+        if self.state == Game.State.Playing:
+            self.pac.render(screen, offset, scale)
 
         # Ghosts
         for ghost in self.ghosts:
-            ghost.render(screen, offset, scale)
+            ghost.render(screen, offset, scale, self.scared_timer)
+
+        if self.state != Game.State.Playing:
+            self.pac.render(screen, offset, scale)
 
 
 def text(str, size, color):
     """Create a text surface with a cached font"""
+    size = int(size)
     if size not in text_dict:
         text_dict[size] = pygame.font.Font(pygame.font.get_default_font(), size)
     return text_dict[size].render(str, True, color)
 
 
 text_dict = {}
+
+
+def draw_rect_alpha(surface, color, rect):
+    shape_surf = pygame.Surface(pygame.Rect(rect).size, pygame.SRCALPHA)
+    pygame.draw.rect(shape_surf, color, shape_surf.get_rect())
+    surface.blit(shape_surf, rect)
+
 
 # Initialization
 pygame.init()
