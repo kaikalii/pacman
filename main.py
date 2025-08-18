@@ -1,6 +1,7 @@
 import pygame
 from pygame import Vector2
 from enum import Enum
+from math import floor
 
 
 def lerp(a, b, t):
@@ -29,7 +30,7 @@ board_spec = [
     "     X.XX          XX.X     ",
     "     X.XX XXX--XXX XX.X     ",
     "XXXXXX.XX X      X XX.XXXXXX",
-    "      .XX X 1234 X XX.      ",
+    "      ... X 1234 X ...      ",
     "XXXXXX.XX X      X XX.XXXXXX",
     "     X.XX XXXXXXXX XX.X     ",
     "     X.XX    S     XX.X     ",
@@ -57,60 +58,105 @@ class Board:
             return None
         if key.y >= self.height:
             return None
-        return self.tiles[key.y][key.x]
+        return self.tiles[int(key.y)][int(key.x)]
 
-
-class Entity:
-    def __init__(self, pos):
-        self.pos = pos
-        self.dest = pos
-        self.prog = 0
-
-    def render_pos(self):
+    def wrap(self, pos):
         return Vector2(
-            lerp(self.pos.x, self.dest.x, self.prog),
-            lerp(self.pos.y, self.dest.y, self.prog),
+            (pos.x % self.width + self.width) % self.width,
+            (pos.y % self.height + self.height) % self.height,
         )
 
-    def update(self, dt):
-        self.prog += dt
-        if self.prog >= 1:
-            self.pos = self.dest
-            self.prog %= 1
-            return True
-        else:
-            return False
+    def get_wrapped(self, key):
+        key = self.wrap(key)
+        return self.tiles[int(key.y)][int(key.x)]
+
+    def set_wrapped(self, key, val):
+        key = self.wrap(key)
+        self.tiles[int(key.y)][int(key.x)] = val
 
 
-class Pacman(Entity):
+speed = 3
+
+
+class Pacman:
     def __init__(self, pos):
-        super().__init__(pos)
+        self.pos = pos
+        self.dir = Vector2(0)
 
     def render(self, screen, offset, scale):
         pygame.draw.circle(
             screen,
             (255, 255, 0),
-            offset + self.render_pos() * scale + Vector2(scale) / 2,
+            offset + self.pos * scale,
             scale / 2,
         )
 
+    def can_move_toward(self, dir, board):
+        target_idx = self.pos + dir
+        target_idx.x = floor(target_idx.x)
+        target_idx.y = floor(target_idx.y)
+        target_tile = board.get_wrapped(target_idx)
+        return target_tile != Tile.Wall and target_tile != Tile.Gate
+
     def update(self, dt, board):
-        super().update(dt)
+        # Get intended direction
+        keys = pygame.key.get_pressed()
+        new_dir = Vector2(0)
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            new_dir.y -= 1
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            new_dir.y += 1
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            new_dir.x -= 1
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            new_dir.x += 1
+        if new_dir.x != 0:
+            new_dir.y = 0
+
+        # Set direction
+        if new_dir.length() > 0 and self.can_move_toward(new_dir, board):
+            if self.dir.dot(new_dir) == 0:
+                if new_dir.x != 0 and (self.pos.y % 1 > 0.4 and self.pos.y % 1 < 0.6):
+                    self.pos.y = floor(self.pos.y) + 0.5
+                    self.dir = new_dir
+                elif new_dir.y != 0 and (self.pos.x % 1 > 0.4 and self.pos.x % 1 < 0.6):
+                    self.pos.x = floor(self.pos.x) + 0.5
+                    self.dir = new_dir
+            else:
+                self.dir = new_dir
+        elif not self.can_move_toward(self.dir * 0.5, board):
+            self.dir = Vector2(0)
+
+        # Update position
+        self.pos += self.dir * dt * speed
+        self.pos = board.wrap(self.pos)
 
 
-class Ghost(Entity):
+class Ghost:
+    class State(Enum):
+        Normal = 0
+        Fleeing = 1
+        Respawning = 2
+
     colors = [(255, 128, 255), (255, 128, 0), (0, 255, 255), (255, 0, 0)]
 
     def __init__(self, id, pos):
-        super().__init__(pos)
         self.id = id
-        self.fleeing = False
+        self.pos = pos
+        self.state = Ghost.State.Normal
 
     def render(self, screen, offset, scale):
-        color = (0, 0, 255) if self.fleeing else Ghost.colors[self.id]
-        tl = offset + self.render_pos() * scale + Vector2(scale * 0.1, 0)
+        color = [
+            Ghost.colors[self.id],
+            (0, 0, 255),
+            (255, 255, 255),
+        ][self.state.value]
+        tl = offset + self.pos * scale + Vector2(scale * 0.1, 0)
         size = Vector2(scale * 0.8, scale)
         pygame.draw.rect(screen, color, (tl, size))
+
+    def update(self, dt):
+        pass
 
 
 class Game:
@@ -140,7 +186,7 @@ class Game:
                         self.ghosts[id] = Ghost(id, Vector2(i, j))
                     case "S":
                         row.append(Tile.Empty)
-                        self.pac = Pacman(Vector2(i, j))
+                        self.pac = Pacman(Vector2(i, j) + Vector2(0.5))
             self.board.tiles.append(row)
 
     def update(self, dt):
