@@ -165,7 +165,9 @@ class Game:
         self.board.height = len(board_spec)
         self.board.width = len(board_spec[0])
         self.board.tiles = []
-        self.ghosts = [None, None, None, None]
+        self.ghosts = []
+        self.score = 0
+        self.flee_timer = 0
         for j, line in enumerate(board_spec):
             row = []
             for i, c in enumerate(line):
@@ -183,6 +185,8 @@ class Game:
                     case "1" | "2" | "3" | "4":
                         row.append(Tile.Empty)
                         id = "1234".index(c)
+                        while len(self.ghosts) <= id:
+                            self.ghosts.append(Ghost(0, Vector2()))
                         self.ghosts[id] = Ghost(id, Vector2(i, j))
                     case "S":
                         row.append(Tile.Empty)
@@ -193,6 +197,23 @@ class Game:
         self.pac.update(dt, self.board)
         for ghost in self.ghosts:
             ghost.update(dt)
+
+        match self.board.get_wrapped(self.pac.pos):
+            case Tile.Pellet:
+                self.board.set_wrapped(self.pac.pos, Tile.Empty)
+                self.score += 1
+            case Tile.Power:
+                self.board.set_wrapped(self.pac.pos, Tile.Empty)
+                self.score += 1
+                self.flee_timer = 10
+                for ghost in self.ghosts:
+                    ghost.state = Ghost.State.Fleeing
+
+        self.flee_timer = max(0, self.flee_timer - dt)
+        if self.flee_timer == 0:
+            for ghost in self.ghosts:
+                if ghost.state == Ghost.State.Fleeing:
+                    ghost.state = Ghost.State.Normal
 
     def render(self, screen):
         screen_size = Vector2(screen.get_width(), screen.get_height())
