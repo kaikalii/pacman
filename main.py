@@ -181,7 +181,7 @@ class Pacman:
                     self.pos.x = floor(self.pos.x) + 0.5
                     self.dir = self.queue
                     self.queue = None
-        elif not self.can_move_toward(self.dir * 0.5, board):
+        if not self.can_move_toward(self.dir * 0.5, board):
             self.dir = Vector2(0)
 
         # Update position
