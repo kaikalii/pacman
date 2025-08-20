@@ -548,7 +548,7 @@ def draw_rect_alpha(surface, color, rect):
 # Initialization
 pygame.init()
 pygame.font.init()
-pygame.display.set_caption("Pop the Lock")
+pygame.display.set_caption("PAC-MAN")
 screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
 clock = pygame.time.Clock()
 game = Game()
